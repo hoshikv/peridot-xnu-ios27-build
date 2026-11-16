@@ -75,7 +75,7 @@ jobs:
       - name: Add peridot machine config
         run: |
           cd .cache/xnu-work
-          python3 ../../setup-peridot.py .
+          python3 ../../../setup-peridot.py .
 
       - name: Build kernel
         run: |
