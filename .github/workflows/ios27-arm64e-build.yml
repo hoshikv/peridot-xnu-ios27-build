@@ -1,0 +1,185 @@
+name: peridot-iOS27-arm64e
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_version:
+        description: iOS version to build
+        default: "27.0"
+        required: true
+
+concurrency:
+  group: peridot-ios27-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-kernel:
+    name: Build xnu-10063 arm64e for peridot
+    runs-on: macos-14
+    timeout-minutes: 180
+    
+    env:
+      XNU_TAG: xnu-10063.141.1
+      XNU_COMMIT: d8b80295118ef25ac3a784134bcf95cd8e88109f
+      XNU_ARCH: arm64
+      MACHINE_CONFIG: PERIDOT
+      KERNEL_CONFIG: DEVELOPMENT
+      IOS_VERSION: 27.0
+      XNU_TARGET: ios
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+        with:
+          path: build-repo
+
+      - name: Clone UniXNU for patches
+        run: |
+          git clone --depth 1 https://github.com/UniXNU/UniXNU ../UniXNU
+
+      - name: Set up XNU source
+        run: |
+          mkdir -p refer .cache
+          if [ ! -d refer/xnu/.git ]; then
+            git clone --depth 1 --branch xnu-10063.141.1 https://github.com/apple-oss-distributions/xnu.git refer/xnu
+          fi
+          if [ "$(git -C refer/xnu rev-parse HEAD)" != "d8b80295118ef25ac3a784134bcf95cd8e88109f" ]; then
+            echo "Error: unexpected XNU reference revision"
+            exit 1
+          fi
+          if [ ! -d .cache/xnu-work/.git ]; then
+            git clone --shared refer/xnu .cache/xnu-work
+          fi
+
+      - name: Copy UniXNU patches
+        run: |
+          mkdir -p patches/xnu patches/xnu-12377
+          cp ../UniXNU/patches/xnu/*.patch patches/xnu/
+          cp ../UniXNU/patches/xnu-12377/*.patch patches/xnu-12377/
+
+      - name: Apply UniXNU patches for arm64e
+        run: |
+          cd .cache/xnu-work
+          for PATCH in ../../patches/xnu/*.patch ../../patches/xnu-12377/*.patch; do
+            if [ -f "$PATCH" ]; then
+              if ! git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+                echo "Applying $(basename "$PATCH")..."
+                git apply --check "$PATCH" && git apply "$PATCH" || echo "Warning: $PATCH failed"
+              fi
+            fi
+          done
+
+      - name: Add peridot machine config
+        run: |
+          cd .cache/xnu-work
+          
+          # Create PERIDOT machine config header
+          cat > pexpert/pexpert/arm64/PERIDOT.h << 'EOF'
+/* Peridot (SM8635) machine config */
+#ifndef _PEXPERT_ARM64_PERIDOT_H
+#define _PEXPERT_ARM64_PERIDOT_H
+
+#define PERIDOT
+#define PERIDOT_BRINGUP
+#define ARM_ARCH_TIMER
+
+#define __ARM_ARCH__              8
+#define __ARM_VMSA__              8
+#define __ARM_VFP__               4
+#define __ARM_COHERENT_CACHE__    1
+#define __ARM_DEBUG__             7
+#define __ARM64_PMAP_SUBPAGE_L1__ 1
+
+/*
+ * arm64e on a non-Apple ARMv8.3 CPU: pointer authentication uses the
+ * architectural key registers (see HAS_NATIVE_PAC in arm64/pac_asm.h).
+ */
+#if defined(__arm64e__)
+#define HAS_APPLE_PAC             1
+#define HAS_NATIVE_PAC            1
+#endif
+
+#ifndef ASSEMBLER
+#define PLATFORM_PANIC_LOG_DISABLED
+#endif /* ! ASSEMBLER */
+
+#endif /* _PEXPERT_ARM64_PERIDOT_H */
+EOF
+
+          # Add PERIDOT board config
+          python3 << 'PYEOF'
+with open('pexpert/pexpert/arm64/board_config.h', 'r') as f:
+    content = f.read()
+
+if 'ARM64_BOARD_CONFIG_PERIDOT' not in content:
+    content = content.replace(
+        '#endif  /* ARM64_BOARD_CONFIG_BCM2837 */',
+        '#endif  /* ARM64_BOARD_CONFIG_BCM2837 */\n\n#ifdef ARM64_BOARD_CONFIG_PERIDOT\n#include <pexpert/arm64/PERIDOT.h>\n\n#define MAX_L2_CLINE                   6\n#define MAX_CPUS                       8 /* SM8635: 1+3+4 cores */\n#define MAX_CPU_CLUSTERS               2\n\n#define PMAP_CS                        1\n#define PMAP_CS_ENABLE                 1\n#define XNU_MONITOR                    1\n#define __ARM_42BIT_PA_SPACE__         1\n#define USE_APPLEARMSMP                1\n#if DEVELOPMENT || DEBUG\n#define XNU_ENABLE_PROCESSOR_EXIT      1\n#endif\n#define XNU_HANDLE_MCC                 1\n#endif  /* ARM64_BOARD_CONFIG_PERIDOT */'
+    )
+    with open('pexpert/pexpert/arm64/board_config.h', 'w') as f:
+        f.write(content)
+PYEOF
+
+          # Update MakeInc.def to add PERIDOT machine config
+          python3 << 'PYEOF'
+with open('makedefs/MakeInc.def', 'r') as f:
+    content = f.read()
+
+content = content.replace(
+    'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE',
+    'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE PERIDOT'
+)
+
+content = content.replace(
+    'MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE',
+    'MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE\nMACHINE_FLAGS_ARM64_PERIDOT = -DARM64_BOARD_CONFIG_PERIDOT'
+)
+
+with open('makedefs/MakeInc.def', 'w') as f:
+    f.write(content)
+PYEOF
+
+      - name: Build kernel
+        run: |
+          cd .cache/xnu-work
+          
+          # Build kernel with arm64e
+          make -j$(sysctl -n hw.ncpu) \
+            SDKROOT=iphoneos \
+            ARCH_CONFIGS=ARM64 \
+            MACHINE_CONFIGS=PERIDOT \
+            KERNEL_CONFIGS=DEVELOPMENT \
+            ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 \
+            KERNELCACHE_ARCH=arm64e \
+            HAS_NATIVE_PAC=1 \
+            HAS_APPLE_PAC=1 \
+            XNU_KERNEL_CHAINED_FIXUPS=1 \
+            BUILD_WERROR=0 \
+            BUILD_LTO=0 \
+            DO_CTFMERGE=0 \
+            CC=clang \
+            CXX=clang++ \
+            2>&1 | tee ../../build/kernel-build.log
+          
+          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
+          if [ ! -f "$KERNEL_PATH" ]; then
+            echo "Kernel not found at $KERNEL_PATH"
+            find BUILD -name "mach.development*" -type f
+            exit 1
+          fi
+          echo "Kernel built successfully: $KERNEL_PATH"
+          ls -la "$KERNEL_PATH"
+          
+          mkdir -p ../../build
+          cp "$KERNEL_PATH" ../../build/mach.development.peridot
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: peridot-arm64e-kernel
+          path: build/mach.development.peridot
+          retention-days: 30
+
