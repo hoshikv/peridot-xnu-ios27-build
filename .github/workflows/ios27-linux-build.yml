@@ -1,4 +1,4 @@
-name: peridot-iOS27-arm64e-linux
+name: peridot-iOS27-arm64e
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         default: "27.0"
 
 concurrency:
-  group: peridot-ios27-linux-${{ github.ref }}
+  group: peridot-ios27-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,16 +16,17 @@ permissions:
 
 jobs:
   build-kernel:
-    name: Build xnu-10063 arm64e on Linux
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
+    name: Build xnu-10063 arm64e for peridot
+    runs-on: macos-14
+    timeout-minutes: 180
     
     env:
       XNU_TAG: xnu-10063.141.1
       XNU_COMMIT: d8b80295118ef25ac3a784134bcf95cd8e88109f
-      UNIXNU_TOOLCHAIN: /opt/unixnu-linux
-      CLT_PREFIX: /opt/unixnu-linux
-      DEFCONFIG: peridot_defconfig
+      XNU_ARCH: arm64e
+      MACHINE_CONFIG: PERIDOT
+      KERNEL_CONFIG: DEVELOPMENT
+      IOS_VERSION: 27.0
 
     steps:
       - name: Checkout build repo
@@ -35,10 +36,6 @@ jobs:
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/UniXNU/UniXNU ../UniXNU
 
-      - name: Install toolchain (root)
-        run: |
-          sudo ../UniXNU/scripts/linux/setup-toolchain.py /opt/unixnu-linux
-          
       - name: Set up XNU source
         run: |
           mkdir -p refer .cache
@@ -76,39 +73,18 @@ jobs:
           cd .cache/xnu-work
           python3 ../../setup-peridot.py .
 
-      - name: Download iPhoneOS 16.5 SDK
+      - name: Build kernel (macOS)
         run: |
-          export THEOS=$HOME/theos
-          mkdir -p $THEOS/sdks
-          url=$(curl -s https://api.github.com/repos/theos/sdks/releases/latest \
-            | jq -r '.assets[] | select(.name=="iPhoneOS16.5.sdk.tar.xz") | .browser_download_url')
-          if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "iPhoneOS 16.5 SDK not found"
-            exit 1
-          fi
-          echo "Downloading iPhoneOS 16.5 SDK..."
-          curl -sL "$url" | tar -xJ -C $THEOS/sdks
-          echo "iPhoneOS 16.5 SDK ready at $THEOS/sdks/iPhoneOS16.5.sdk"
-
-      - name: Build kernel using UniXNU build script (from UniXNU root)
-        run: |
-          cd ../UniXNU
+          cd .cache/xnu-work
           
-          # Set up Linux build environment
-          export PLATFORM=iPhoneOS
-          export HOST_CC=$CLT_PREFIX/bin/xnu-host-cc
-          export MIGCOM=$CLT_PREFIX/libexec/migcom
-          export PATH=$UNIXNU_TOOLCHAIN/llvm/bin:$CLT_PREFIX/bin:$PATH
-          
+          # Build kernel on macOS with Xcode
           mkdir -p ../../build
-          
-          # Use UniXNU's build script for Linux (handles cross-compilation properly)
           RC_DARWIN_KERNEL_VERSION=23.6.0 \
-          SDKROOT=$HOME/theos/sdks/iPhoneOS16.5.sdk \
+          SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
           ARCH_CONFIGS=ARM64 \
           MACHINE_CONFIGS=PERIDOT \
           KERNEL_CONFIGS=DEVELOPMENT \
-          ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 \
+          ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64e \
           KERNELCACHE_ARCH=arm64e \
           HAS_NATIVE_PAC=1 \
           HAS_APPLE_PAC=1 \
@@ -116,15 +92,26 @@ jobs:
           BUILD_WERROR=0 \
           BUILD_LTO=0 \
           DO_CTFMERGE=0 \
-          TIGHTBEAMC=tightbeamc-not-supported \
           BUILD_DSYM=0 \
-          MEMORY_SIZE=$(($(getconf _PHYS_PAGES) * $(getconf PAGE_SIZE))) \
-          SYSCTL_HW_PHYSICALCPU=$(nproc) \
-          SYSCTL_HW_LOGICALCPU=$(nproc) \
-          LD_KERNEL_LIBS=$UNIXNU_TOOLCHAIN/llvm/lib/kernel/libcc_kext.a \
-          scripts/build-xnu-4k-baseline.sh 2>&1 | tee ../../build/kernel-build.log
+          make -j$(sysctl -n hw.logicalcpu) \
+            SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
+            ARCH_CONFIGS=ARM64 \
+            MACHINE_CONFIGS=PERIDOT \
+            KERNEL_CONFIGS=DEVELOPMENT \
+            ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64e \
+            KERNELCACHE_ARCH=arm64e \
+            HAS_NATIVE_PAC=1 \
+            HAS_APPLE_PAC=1 \
+            XNU_KERNEL_CHAINED_FIXUPS=1 \
+            BUILD_WERROR=0 \
+            BUILD_LTO=0 \
+            DO_CTFMERGE=0 \
+            BUILD_DSYM=0 \
+            CC=clang \
+            CXX=clang++ \
+            2>&1 | tee ../../build/kernel-build.log
           
-          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
+          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64E_PERIDOT/mach.development.peridot"
           if [ ! -f "$KERNEL_PATH" ]; then
             echo "Kernel not found at $KERNEL_PATH"
             find BUILD -name "mach.development*" -type f
@@ -133,7 +120,6 @@ jobs:
           echo "Kernel built successfully: $KERNEL_PATH"
           ls -la "$KERNEL_PATH"
           
-          mkdir -p ../../build
           cp "$KERNEL_PATH" ../../build/mach.development.peridot
 
       - name: Upload kernel artifact
