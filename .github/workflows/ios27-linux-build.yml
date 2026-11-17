@@ -1,0 +1,160 @@
+name: peridot-iOS27-arm64e-linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_version:
+        description: iOS version
+        default: "27.0"
+
+concurrency:
+  group: peridot-ios27-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-kernel:
+    name: Build xnu-10063 arm64e on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    env:
+      XNU_TAG: xnu-10063.141.1
+      XNU_COMMIT: d8b80295118ef25ac3a784134bcf95cd8e88109f
+      UNIXNU_TOOLCHAIN: /opt/unixnu-linux
+      CLT_PREFIX: /opt/unixnu-linux
+      DEFCONFIG: peridot_defconfig
+
+    steps:
+      - name: Checkout build repo
+        uses: actions/checkout@v4
+
+      - name: Clone UniXNU
+        run: |
+          git clone --depth 1 https://github.com/UniXNU/UniXNU ../UniXNU
+
+      - name: Install toolchain (root)
+        run: |
+          sudo ../UniXNU/scripts/linux/setup-toolchain.py /opt/unixnu-linux
+          
+      - name: Set up XNU source
+        run: |
+          mkdir -p refer .cache
+          if [ ! -d refer/xnu/.git ]; then
+            git clone --depth 1 --branch xnu-10063.141.1 https://github.com/apple-oss-distributions/xnu.git refer/xnu
+          fi
+          if [ "$(git -C refer/xnu rev-parse HEAD)" != "d8b80295118ef25ac3a784134bcf95cd8e88109f" ]; then
+            echo "Error: unexpected XNU reference revision"
+            exit 1
+          fi
+          if [ ! -d .cache/xnu-work/.git ]; then
+            git clone --shared refer/xnu .cache/xnu-work
+          fi
+
+      - name: Clone UniXNU patches
+        run: |
+          mkdir -p patches/xnu patches/xnu-12377
+          cp ../../UniXNU/patches/xnu/*.patch patches/xnu/
+          cp ../../UniXNU/patches/xnu-12377/*.patch patches/xnu-12377/
+
+      - name: Apply UniXNU patches for arm64e
+        run: |
+          cd .cache/xnu-work
+          for PATCH in ../../patches/xnu/*.patch ../../patches/xnu-12377/*.patch; do
+            if [ -f "$PATCH" ]; then
+              if ! git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+                echo "Applying $(basename "$PATCH")..."
+                git apply --check "$PATCH" && git apply "$PATCH" || echo "Warning: $PATCH failed"
+              fi
+            fi
+          done
+
+      - name: Add peridot machine config
+        run: |
+          cd .cache/xnu-work
+          python3 ../../../setup-peridot.py .
+
+      - name: Download iPhoneOS 16.5 SDK
+        run: |
+          export THEOS=$HOME/theos
+          mkdir -p $THEOS/sdks
+          url=$(curl -s https://api.github.com/repos/theos/sdks/releases/latest \
+            | jq -r '.assets[] | select(.name=="iPhoneOS16.5.sdk.tar.xz") | .browser_download_url')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "iPhoneOS 16.5 SDK not found"
+            exit 1
+          fi
+          echo "Downloading iPhoneOS 16.5 SDK..."
+          curl -sL "$url" | tar -xJ -C $THEOS/sdks
+          echo "iPhoneOS 16.5 SDK ready at $THEOS/sdks/iPhoneOS16.5.sdk"
+
+      - name: Build kernel
+        run: |
+          cd .cache/xnu-work
+          
+          # Set up Linux build environment
+          export PLATFORM=iPhoneOS
+          export HOST_CC=$CLT_PREFIX/bin/xnu-host-cc
+          export MIGCOM=$CLT_PREFIX/libexec/migcom
+          export PATH=$UNIXNU_TOOLCHAIN/llvm/bin:$CLT_PREFIX/bin:$PATH
+          
+          mkdir -p ../../build
+          
+          # Use UniXNU's build script logic for Linux
+          RC_DARWIN_KERNEL_VERSION=23.6.0 \
+          SDKROOT=$HOME/theos/sdks/iPhoneOS16.5.sdk \
+          ARCH_CONFIGS=ARM64 \
+          MACHINE_CONFIGS=PERIDOT \
+          KERNEL_CONFIGS=DEVELOPMENT \
+          ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 \
+          KERNELCACHE_ARCH=arm64e \
+          HAS_NATIVE_PAC=1 \
+          HAS_APPLE_PAC=1 \
+          XNU_KERNEL_CHAINED_FIXUPS=1 \
+          BUILD_WERROR=0 \
+          BUILD_LTO=0 \
+          DO_CTFMERGE=0 \
+          TIGHTBEAMC=tightbeamc-not-supported \
+          BUILD_DSYM=0 \
+          MEMORY_SIZE=$(($(getconf _PHYS_PAGES) * $(getconf PAGE_SIZE))) \
+          SYSCTL_HW_PHYSICALCPU=$(nproc) \
+          SYSCTL_HW_LOGICALCPU=$(nproc) \
+          LD_KERNEL_LIBS=$UNIXNU_TOOLCHAIN/llvm/lib/kernel/libcc_kext.a \
+          make -j$(nproc) \
+            SDKROOT=$HOME/theos/sdks/iPhoneOS16.5.sdk \
+            ARCH_CONFIGS=ARM64 \
+            MACHINE_CONFIGS=PERIDOT \
+            KERNEL_CONFIGS=DEVELOPMENT \
+            ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 \
+            KERNELCACHE_ARCH=arm64e \
+            HAS_NATIVE_PAC=1 \
+            HAS_APPLE_PAC=1 \
+            XNU_KERNEL_CHAINED_FIXUPS=1 \
+            BUILD_WERROR=0 \
+            BUILD_LTO=0 \
+            DO_CTFMERGE=0 \
+            CC=$UNIXNU_TOOLCHAIN/llvm/bin/clang \
+            CXX=$UNIXNU_TOOLCHAIN/llvm/bin/clang++ \
+            2>&1 | tee ../../build/kernel-build.log
+          
+          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
+          if [ ! -f "$KERNEL_PATH" ]; then
+            echo "Kernel not found at $KERNEL_PATH"
+            find BUILD -name "mach.development*" -type f
+            exit 1
+          fi
+          echo "Kernel built successfully: $KERNEL_PATH"
+          ls -la "$KERNEL_PATH"
+          
+          mkdir -p ../../build
+          cp "$KERNEL_PATH" ../../build/mach.development.peridot
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: peridot-arm64e-kernel
+          path: build/mach.development.peridot
+          retention-days: 30
+
