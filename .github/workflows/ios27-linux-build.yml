@@ -82,6 +82,19 @@ jobs:
         run: |
           cd .cache/xnu-work
           
+          # Find available iOS SDK
+          IOS_SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
+          echo "Using SDK: $IOS_SDK_PATH"
+          
+          # Check if availability.pl exists
+          if [ -f "$(xcrun --sdk iphoneos --show-sdk-path)/usr/local/libexec/availability.pl" ]; then
+            echo "availability.pl found"
+          else
+            echo "WARNING: availability.pl not found in iPhoneOS SDK"
+            # Try to find it elsewhere
+            find /Applications/Xcode*.app -name "availability.pl" 2>/dev/null | head -5
+          fi
+          
           # Build kernel on macOS with Xcode
           mkdir -p ../../build
           RC_DARWIN_KERNEL_VERSION=23.6.0 \
