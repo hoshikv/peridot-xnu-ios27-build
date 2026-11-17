@@ -29,6 +29,7 @@ jobs:
       KERNEL_CONFIG: DEVELOPMENT
       IOS_VERSION: 27.0
       XNU_TARGET: ios
+      RC_DARWIN_KERNEL_VERSION: 23.6.0
 
     steps:
       - name: Checkout build repo
@@ -80,7 +81,8 @@ jobs:
           cd .cache/xnu-work
           
           # Build kernel with arm64e
-          make -j$(sysctl -n hw.ncpu) \
+          mkdir -p ../../build
+          RC_DARWIN_KERNEL_VERSION=23.6.0 make -j$(sysctl -n hw.ncpu) \
             SDKROOT=iphoneos \
             ARCH_CONFIGS=ARM64 \
             MACHINE_CONFIGS=PERIDOT \
@@ -106,7 +108,6 @@ jobs:
           echo "Kernel built successfully: $KERNEL_PATH"
           ls -la "$KERNEL_PATH"
           
-          mkdir -p ../../build
           cp "$KERNEL_PATH" ../../build/mach.development.peridot
 
       - name: Upload kernel artifact
