@@ -31,9 +31,9 @@ jobs:
       - name: Checkout build repo
         uses: actions/checkout@v4
 
-      - name: Clone UniXNU
+      - name: Clone UniXNU (with submodules)
         run: |
-          git clone --depth 1 https://github.com/UniXNU/UniXNU ../UniXNU
+          git clone --depth 1 --recurse-submodules https://github.com/UniXNU/UniXNU ../UniXNU
 
       - name: Install toolchain (root)
         run: |
@@ -124,10 +124,10 @@ jobs:
           LD_KERNEL_LIBS=$UNIXNU_TOOLCHAIN/llvm/lib/kernel/libcc_kext.a \
           scripts/build-xnu-4k-baseline.sh 2>&1 | tee ../../build/kernel-build.log
           
-          KERNEL_PATH="../../UniXNU/BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
+          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
           if [ ! -f "$KERNEL_PATH" ]; then
             echo "Kernel not found at $KERNEL_PATH"
-            find ../../UniXNU/BUILD -name "mach.development*" -type f
+            find BUILD -name "mach.development*" -type f
             exit 1
           fi
           echo "Kernel built successfully: $KERNEL_PATH"
