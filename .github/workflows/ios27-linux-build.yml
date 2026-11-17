@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-kernel:
     name: Build xnu-10063 arm64e for peridot
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 180
     
     env:
