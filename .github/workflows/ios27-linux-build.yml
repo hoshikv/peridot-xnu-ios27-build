@@ -62,7 +62,7 @@ jobs:
           for PATCH in ../../../patches/xnu/*.patch ../../../patches/xnu-12377/*.patch; do
             if [ -f "$PATCH" ]; then
               if ! git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
-                echo "Applying $(basename "$PATCH")..."
+                echo "Applying $(basename "$PATCH")...."
                 git apply --check "$PATCH" && git apply "$PATCH" || echo "Warning: $PATCH failed"
               fi
             fi
@@ -92,6 +92,25 @@ jobs:
             find /Applications/Xcode*.app -name "availability.pl" 2>/dev/null | head -5
           fi
 
+      - name: Find and copy availability.pl if missing
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          if [ ! -f "$SDK_PATH/usr/local/libexec/availability.pl" ]; then
+            echo "availability.pl missing from SDK, searching for it..."
+            AVAILABILITY_PL=$(find /Applications/Xcode*.app -name "availability.pl" 2>/dev/null | head -1)
+            if [ -n "$AVAILABILITY_PL" ]; then
+              echo "Found availability.pl at: $AVAILABILITY_PL"
+              # Copy it to the SDK
+              mkdir -p "$(xcrun --sdk iphoneos --show-sdk-path)/usr/local/libexec"
+              cp "$AVAILABILITY_PL" "$(xcrun --sdk iphoneos --show-sdk-path)/usr/local/libexec/availability.pl"
+              chmod +x "$(xcrun --sdk iphoneos --show-sdk-path)/usr/local/libexec/availability.pl"
+              echo "Copied availability.pl to SDK"
+            else
+              echo "Could not find availability.pl anywhere!"
+              exit 1
+            fi
+          fi
+
       - name: Build kernel (macOS)
         run: |
           cd .cache/xnu-work
@@ -99,15 +118,6 @@ jobs:
           # Find available iOS SDK
           IOS_SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "")
           echo "Using SDK: $IOS_SDK_PATH"
-          
-          # Check if availability.pl exists
-          if [ -f "$(xcrun --sdk iphoneos --show-sdk-path)/usr/local/libexec/availability.pl" ]; then
-            echo "availability.pl found in SDK"
-          else
-            echo "WARNING: availability.pl not found in iPhoneOS SDK"
-            # Try to find it
-            find /Applications/Xcode*.app -name "availability.pl" 2>/dev/null | head -5
-          fi
           
           # Build kernel on macOS with Xcode
           mkdir -p ../../build
