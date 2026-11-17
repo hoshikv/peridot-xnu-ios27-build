@@ -65,27 +65,28 @@ def create_peridot_config():
     with open(makeinc_path, "r") as f:
         content = f.read()
 
-    # Add PERIDOT to SUPPORTED_ARM64_MACHINE_CONFIGS - find any line with SUPPORTED_ARM64_MACHINE_CONFIGS
+    print("=== Original MakeInc.def (first 50 lines) ===")
+    for i, line in enumerate(content.split('\n')[:50]):
+        if 'SUPPORTED_ARM64' in line or 'PERIDOT' in line or 'MACHINE_FLAGS' in line or 'SUPPORTED_ARM64' in line:
+            print(f"  Line: {line}")
+
+    # Force add PERIDOT to SUPPORTED_ARM64_MACHINE_CONFIGS
+    # Find the line with SUPPORTED_ARM64_MACHINE_CONFIGS
     lines = content.split('\n')
     new_lines = []
+    found = False
     for line in lines:
         new_lines.append(line)
-        # Add PERIDOT to SUPPORTED_ARM64_MACHINE_CONFIGS
         if 'SUPPORTED_ARM64_MACHINE_CONFIGS' in line and 'PERIDOT' not in line:
-            # Replace the line to add PERIDOT
-            if 'SUPPORTED_ARM64_MACHINE_CONFIGS' in line:
-                line = line.replace('VMAPPLE', 'VMAPPLE PERIDOT')
-        new_lines.append(line) if False else None  # placeholder
+            # Modify this line
+            new_lines[-1] = line.replace('VMAPPLE', 'VMAPPLE PERIDOT')
+            print(f"Modified SUPPORTED line: {new_lines[-1]}")
+            found = True
+
+    content = '\n'.join(new_lines)
     
-    # Better approach: rebuild the content
-    content = '\n'.join([line for line in content.split('\n')])
-    content = content.replace(
-        'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE',
-        'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE PERIDOT'
-    )
-    
-    # If exact match not found, try with different spacing
-    if 'PERIDOT' not in content:
+    # If not found, try regex
+    if 'PERIDOT' not in '\n'.join(new_lines):
         content = re.sub(
             r'SUPPORTED_ARM64_MACHINE_CONFIGS\s*=\s*BCM2837\s+T6000\s+T8101\s+T8103\s+VMAPPLE',
             'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE PERIDOT',
@@ -93,26 +94,27 @@ def create_peridot_config():
         )
     
     # Add MACHINE_FLAGS for PERIDOT
-    if 'MACHINE_FLAGS_ARM64_PERIDOT' not in content:
-        content = content.replace(
-            'MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE',
-            'MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE\nMACHINE_FLAGS_ARM64_PERIDOT = -DARM64_BOARD_CONFIG_PERIDOT'
+    if 'MACHINE_FLAGS_ARM64_PERIDOT' not in '\n'.join(new_lines):
+        content = re.sub(
+            r'(MACHINE_FLAGS_ARM64_VMAPPLE\s*=\s*-DARM64_BOARD_CONFIG_VMAPPLE)',
+            r'\1\nMACHINE_FLAGS_ARM64_PERIDOT = -DARM64_BOARD_CONFIG_PERIDOT',
+            '\n'.join(new_lines)
         )
-    
-    with open("makedefs/MakeInc.def", "w") as f:
+
+    with open(makeinc_path, "w") as f:
         f.write(content)
     print("Updated MakeInc.def")
 
     # Verify
-    with open("makedefs/MakeInc.def", "r") as f:
+    with open(makeinc_path, "r") as f:
         verify = f.read()
         if 'PERIDOT' in verify:
             print("VERIFIED: PERIDOT found in MakeInc.def")
         else:
             print("WARNING: PERIDOT NOT FOUND in MakeInc.def!")
             for i, line in enumerate(verify.split('\n'), 1):
-                if 'SUPPORTED_ARM64_MACHINE_CONFIGS' in line or 'PERIDOT' in line or 'MACHINE_FLAGS_ARM64' in line:
-                    print(f"  Line {i}: {line[:120]}")
+                if 'SUPPORTED_ARM64' in line or 'PERIDOT' in line or 'MACHINE_FLAGS' in line:
+                    print(f"  Line {i}: {line[:150]}")
 
 if __name__ == "__main__":
     import sys
