@@ -73,6 +73,11 @@ jobs:
           cd .cache/xnu-work
           python3 ../../setup-peridot.py .
 
+      - name: Check available SDKs
+        run: |
+          ls -la /Applications/Xcode_*.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/
+          xcodebuild -showsdks
+
       - name: Build kernel (macOS)
         run: |
           cd .cache/xnu-work
