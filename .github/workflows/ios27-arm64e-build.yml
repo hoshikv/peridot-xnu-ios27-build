@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-kernel:
     name: Build xnu-10063 arm64e for peridot
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 180
     
     env:
@@ -29,7 +29,6 @@ jobs:
       KERNEL_CONFIG: DEVELOPMENT
       IOS_VERSION: 27.0
       XNU_TARGET: ios
-      RC_DARWIN_KERNEL_VERSION: 23.6.0
 
     steps:
       - name: Checkout build repo
@@ -108,6 +107,7 @@ jobs:
           echo "Kernel built successfully: $KERNEL_PATH"
           ls -la "$KERNEL_PATH"
           
+          mkdir -p ../../build
           cp "$KERNEL_PATH" ../../build/mach.development.peridot
 
       - name: Upload kernel artifact
