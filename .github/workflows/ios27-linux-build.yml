@@ -90,9 +90,9 @@ jobs:
           curl -sL "$url" | tar -xJ -C $THEOS/sdks
           echo "iPhoneOS 16.5 SDK ready at $THEOS/sdks/iPhoneOS16.5.sdk"
 
-      - name: Build kernel using UniXNU build script
+      - name: Build kernel using UniXNU build script (from UniXNU root)
         run: |
-          cd .cache/xnu-work
+          cd ../UniXNU
           
           # Set up Linux build environment
           export PLATFORM=iPhoneOS
@@ -122,12 +122,12 @@ jobs:
           SYSCTL_HW_PHYSICALCPU=$(nproc) \
           SYSCTL_HW_LOGICALCPU=$(nproc) \
           LD_KERNEL_LIBS=$UNIXNU_TOOLCHAIN/llvm/lib/kernel/libcc_kext.a \
-          ../../../UniXNU/scripts/build-xnu-4k-baseline.sh 2>&1 | tee ../../build/kernel-build.log
+          scripts/build-xnu-4k-baseline.sh 2>&1 | tee ../../build/kernel-build.log
           
-          KERNEL_PATH="BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
+          KERNEL_PATH="../../UniXNU/BUILD/obj/DEVELOPMENT_ARM64_PERIDOT/mach.development.peridot"
           if [ ! -f "$KERNEL_PATH" ]; then
             echo "Kernel not found at $KERNEL_PATH"
-            find BUILD -name "mach.development*" -type f
+            find ../../UniXNU/BUILD -name "mach.development*" -type f
             exit 1
           fi
           echo "Kernel built successfully: $KERNEL_PATH"
