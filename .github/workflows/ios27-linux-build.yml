@@ -56,8 +56,8 @@ jobs:
       - name: Copy UniXNU patches
         run: |
           mkdir -p patches/xnu patches/xnu-12377
-          cp ../../UniXNU/patches/xnu/*.patch patches/xnu/
-          cp ../../UniXNU/patches/xnu-12377/*.patch patches/xnu-12377/
+          cp ../UniXNU/patches/xnu/*.patch patches/xnu/
+          cp ../UniXNU/patches/xnu-12377/*.patch patches/xnu-12377/
 
       - name: Apply UniXNU patches for arm64e
         run: |
