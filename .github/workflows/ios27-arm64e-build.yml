@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-kernel:
     name: Build xnu-10063 arm64e for peridot
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 180
     
     env:
@@ -75,6 +75,20 @@ jobs:
           cd .cache/xnu-work
           python3 ../../setup-peridot.py .
 
+      - name: Install iPhoneOS 16.5 SDK
+        run: |
+          export THEOS=$HOME/theos
+          mkdir -p $THEOS/sdks
+          url=$(curl -s https://api.github.com/repos/theos/sdks/releases/latest \
+            | jq -r '.assets[] | select(.name=="iPhoneOS16.5.sdk.tar.xz") | .browser_download_url')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "iPhoneOS 16.5 SDK not found on theos/sdks"
+            exit 1
+          fi
+          echo "Downloading iPhoneOS 16.5 SDK..."
+          curl -sL "$url" | tar -xJ -C /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/
+          echo "iPhoneOS 16.5 SDK installed"
+
       - name: Build kernel
         run: |
           cd .cache/xnu-work
@@ -82,7 +96,7 @@ jobs:
           # Build kernel with arm64e
           mkdir -p ../../build
           RC_DARWIN_KERNEL_VERSION=23.6.0 make -j$(sysctl -n hw.ncpu) \
-            SDKROOT=iphoneos \
+            SDKROOT=iphoneos16.5 \
             ARCH_CONFIGS=ARM64 \
             MACHINE_CONFIGS=PERIDOT \
             KERNEL_CONFIGS=DEVELOPMENT \
