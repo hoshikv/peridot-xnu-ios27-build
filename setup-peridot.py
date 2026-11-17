@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import os
 import sys
+import re
 
 def create_peridot_config():
     """Create PERIDOT machine configuration for xnu-10063"""
+    base = sys.argv[1] if len(sys.argv) > 1 else "."
+    os.chdir(base)
     
     # Create PERIDOT machine config header
     peridot_h = """/* Peridot (SM8635) machine config */
@@ -57,24 +60,40 @@ def create_peridot_config():
             f.write(content)
         print("Updated board_config.h")
 
-    # Update MakeInc.def
+    # Update MakeInc.def - use regex for flexible matching
     makeinc_path = "makedefs/MakeInc.def"
     with open(makeinc_path, "r") as f:
         content = f.read()
 
-    content = content.replace(
-        "SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE",
-        "SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE PERIDOT"
+    # Find and replace SUPPORTED_ARM64_MACHINE_CONFIGS line
+    content = re.sub(
+        r'SUPPORTED_ARM64_MACHINE_CONFIGS\s*=\s*BCM2837\s+T6000\s+T8101\s+T8103\s+VMAPPLE(\s*)(?:\\|$)',
+        r'SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE PERIDOT\1',
+        content
     )
 
-    content = content.replace(
-        "MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE",
-        "MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE\nMACHINE_FLAGS_ARM64_PERIDOT = -DARM64_BOARD_CONFIG_PERIDOT"
+    # Find and add PERIDOT machine flags after VMAPPLE
+    content = re.sub(
+        r'(MACHINE_FLAGS_ARM64_VMAPPLE\s*=\s*-DARM64_BOARD_CONFIG_VMAPPLE)',
+        r'\1\nMACHINE_FLAGS_ARM64_PERIDOT = -DARM64_BOARD_CONFIG_PERIDOT',
+        content
     )
 
     with open(makeinc_path, "w") as f:
         f.write(content)
     print("Updated MakeInc.def")
+
+    # Verify the changes
+    with open(makeinc_path, "r") as f:
+        verify = f.read()
+        if "PERIDOT" in verify:
+            print("VERIFIED: PERIDOT found in MakeInc.def")
+        else:
+            print("WARNING: PERIDOT NOT FOUND in MakeInc.def!")
+            # Print relevant lines
+            for i, line in enumerate(verify.split('\n'), 1):
+                if 'SUPPORTED_ARM64_MACHINE_CONFIGS' in line or 'PERIDOT' in line:
+                    print(f"  Line {i}: {line}")
 
 if __name__ == "__main__":
     import sys
